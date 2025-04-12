@@ -1,0 +1,19 @@
+{
+  "name": "rtsp-recorder",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@googleapis/drive": "^11.0.0",
+    "better-sqlite3": "^8.7.0",
+    "dotenv": "^16.4.5",
+    "fluent-ffmpeg": "^2.1.3",
+    "mqtt": "^5.10.4"
+  }
+}

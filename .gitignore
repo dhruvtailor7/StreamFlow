@@ -1,0 +1,17 @@
+node_modules
+.env
+
+# Google Drive credentials
+credentials.json
+
+# FFmpeg logs
+ffmpeg.log
+
+dist/
+
+# Database files
+db/recordings.db
+
+test.js
+
+.DS_Store
