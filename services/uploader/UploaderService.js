@@ -1,18 +1,18 @@
-const { markAsUploaded, getPendingUploads, getRecordingById } = require('../../db/database');
-const mqttController = require('../../mqtt/mqttController');
-const { uploadFileToDrive } = require('../../utils/driveUpload');
+const { uploadFileToDrive } = require('../../utils/googleDriveHelper');
 const { createLogger } = require('../../utils/logger');
+const Recording = require('../../model/Recording');
 const fs = require('fs');
-
+const crypto = require('node:crypto');
 const logger = createLogger('Uploader');
 
 class UploaderService {
   constructor() {
-    this.isRunning = false;
-    this.retryInterval = 5 * 60 * 1000; // 5 minutes in milliseconds
-    this.retryTimer = null;
-    // Store topics for easy access
-    this.topics = mqttController.getTopics();
+    this.pendingUploads = [];
+    this.lastUploadedId = 0;
+    this.batchSize = 10;
+    this.maxRuntime = 1000 * 60 * 30; // 30 minutes
+    this.lockId = crypto.randomUUID();
+    this.maxRetries = 3;
   }
 
   /**
@@ -20,42 +20,83 @@ class UploaderService {
    */
   async initialize() {
     try {
-      
-      await mqttController.subscribe(this.topics.NEW_RECORDING, (recordingData) => {
-        this._handleNewRecording(recordingData);
-      });
-      
-      logger.info('Uploader service initialized successfully');
-      
-      this._processBacklog();
-      
-      this.retryTimer = setInterval(() => {
-        this._processBacklog();
-      }, this.retryInterval);
-      
-      this.isRunning = true;
-      return true;
+      this.startTime = new Date();
+      await this._processBacklog();
     } catch (error) {
       logger.error(`Failed to initialize uploader service: ${error.message}`);
-      return false;
     }
   }
 
   /**
-   * Handle a new recording notification
-   * @param {Object} recordingData - Data about the new recording
+   * Process any recordings in the backlog that need uploading
    */
-  async _handleNewRecording(recordingData) {
-    logger.info(`Received new recording notification for file id: ${recordingData.id}`);
-      
-    try {
-      const recording = await getRecordingById(recordingData.id);
+  async _processBacklog() {
+    logger.info('Processing backlog of pending uploads...');
+    
+    do{
+      if(new Date() - this.startTime > this.maxRuntime) {
+        logger.info('Stopping uploader service due to max runtime of 30 minutes');
+        break;
+      }
 
-      await this._uploadRecording(recording);
-    } catch (error) {
-      logger.error(`Error uploading recording ${recordingData.id}: ${error.message}`);
-    }
+      this.pendingUploads = this._getPendingUploads();
+
+      if(this.pendingUploads.length === 0) {
+        logger.info('No pending uploads found in backlog');
+        break;
+      }
+
+      logger.info(`Found ${this.pendingUploads.length} pending uploads in backlog`);
+
+      for (const recording of this.pendingUploads) {
+        try {
+          await this._uploadRecording(recording);
+          this.lastUploadedId = recording.id;
+        } catch (error) {
+          logger.error(`Error uploading recording ${recording.id}: ${error.message}`);
+          Recording.update(
+            {
+              upload_status: Recording.UPLOAD_STATUS.FAILED,
+              lock_id: null,
+              locked_at: null,
+              retry_count: recording.retry_count + 1
+            }, 
+            {
+              where: {id: recording.id}
+            }
+          );
+        }
+      }
+    } while (true);
   }
+
+  _getPendingUploads() {
+    return Recording.runInTransaction(() => {
+      const rows = Recording.find({
+        limit: this.batchSize,
+        where: {
+          id: { '>': this.lastUploadedId },
+          OR: [
+            { upload_status: Recording.UPLOAD_STATUS.PENDING },
+            // { upload_status: Recording.UPLOAD_STATUS.FAILED, retry_count: { '<=': this.maxRetries } }
+          ],
+          lock_id: null
+        }
+      });
+    
+      if (rows.length === 0) return [];
+    
+      Recording.update({
+        lock_id: this.lockId,
+        locked_at: new Date().toISOString()
+      }, {
+        where: { id: { IN: rows.map(r => r.id) } }
+      });
+    
+      return rows;
+    });
+  }
+
 
   /**
    * Upload a recording to Google Drive
@@ -71,61 +112,22 @@ class UploaderService {
       
       const uploadResult = await uploadFileToDrive(recording.filepath, recording.date);
       
-      await markAsUploaded(
-        recording.id,
-        uploadResult.id,
-        uploadResult.webViewLink
-      );
-      
-      await mqttController.publish(this.topics.UPLOAD_SUCCESS, {
-        recordingId: recording.id,
-        driveFileId: uploadResult.id,
-        driveLink: uploadResult.webViewLink
+      Recording.update({
+        upload_status: Recording.UPLOAD_STATUS.UPLOADED,
+        drive_file_id: uploadResult.id,
+        drive_link: uploadResult.webViewLink,
+        uploaded_at: new Date().toISOString(),
+        lock_id: null,
+        locked_at: null
+      }, {
+        where: {id: recording.id}
       });
       
       logger.success(`Successfully uploaded recording ${recording.id} to Google Drive`);
     } catch (error) {
       logger.error(`Error uploading recording ${recording.id}: ${error.message}`);
       
-      await mqttController.publish(this.topics.UPLOAD_ERROR, {
-        recordingId: recording.id,
-        error: error.message
-      });
-      
       throw error;
-    }
-  }
-
-  /**
-   * Process any recordings in the backlog that need uploading
-   */
-  async _processBacklog() {
-    try {
-      logger.info('Processing backlog of pending uploads...');
-      
-      const pendingUploads = await getPendingUploads();
-      
-      if (pendingUploads.length === 0) {
-        logger.info('No pending uploads found in backlog');
-        return;
-      }
-      
-      logger.info(`Found ${pendingUploads.length} pending uploads in backlog`);
-      
-      for (const recording of pendingUploads) {
-        try {
-          await this._uploadRecording({
-            id: recording.id,
-            filename: recording.filename,
-            filepath: recording.filepath,
-            date: recording.date,
-          });
-        } catch (error) {
-          logger.error(`Error processing backlog upload for recording ${recording.id}: ${error.message}`);
-        }
-      }
-    } catch (error) {
-      logger.error(`Error processing backlog: ${error.message}`);
     }
   }
 
@@ -133,7 +135,6 @@ class UploaderService {
    * Stop the uploader service
    */
   async stop() {
-    this.isRunning = false;
     
     if (this.retryTimer) {
       clearInterval(this.retryTimer);

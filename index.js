@@ -47,16 +47,10 @@ function startRecorder() {
   logger.success('Recorder service started');
 }
 
-async function startUploader() {
+function startUploader() {
   uploaderService = new UploaderService();
-  const initialized = await uploaderService.initialize();
-  
-  if (initialized) {
-    logger.success('Uploader service started');
-  } else {
-    logger.error('Failed to start uploader service');
-    process.exit(1);
-  }
+  uploaderService.initialize();
+  logger.success('Uploader service started');
 }
 
 async function start() {
@@ -76,7 +70,7 @@ async function start() {
     }
     
     if (mode === 'all' || mode === 'uploader') {
-      await startUploader();
+      startUploader();
     }
 
     logger.success('Startup complete');

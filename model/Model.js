@@ -12,15 +12,42 @@ class Model {
     return this._logger;
   }
 
+  static _dbContext = null;
+
+  static setDbContext(db) {
+    this._dbContext = db;
+  }
+
+  static clearDbContext() {
+    this._dbContext = null;
+  }
+
+  static get db() {
+    return this._dbContext || DatabaseService.getDbConnection();
+  }
+
+  static runInTransaction(callback) {
+    const db = DatabaseService.getDbConnection();
+  
+    return db.transaction(() => {
+      this.setDbContext(db);
+      try {
+        return callback();
+      } finally {
+        this.clearDbContext();
+      }
+    })();
+  }
+
   static create(data) {
     this.addDefaultValuesIfNotExists(data);
 
     try {
-      const db = DatabaseService.getDbConnection();
       const columns = Object.keys(data);
       const values = Object.values(data);
       const query = `INSERT INTO ${this.tableName} (${columns.join(', ')}) VALUES (${values.map(() => '?').join(', ')})`;
-      const stmt = db.prepare(query);
+      this.logger.debug(`query: ${query}`);
+      const stmt = this.db.prepare(query);
       const result = stmt.run(values);
       return result;
     } catch (error) {
@@ -29,11 +56,24 @@ class Model {
     }
   }
 
-  static find(id, columns = '*') {
+  static find({columns = '*', limit, offset, where = {}}) {
     try {
-      const db = DatabaseService.getDbConnection();
-      const stmt = db.prepare(`SELECT ${columns} FROM ${this.tableName} WHERE id = ?`);
-      const result = stmt.get(id);
+      let query = `SELECT ${columns} FROM ${this.tableName}`;
+      const whereData = this.prepareWhereClause(where);
+      if(whereData.clause) {
+        query += ` WHERE ${whereData.clause}`;
+      }
+
+      if(limit) {
+        query += ` LIMIT ${limit}`;
+      }
+
+      if(offset) {
+        query += ` OFFSET ${offset}`;
+      }
+      this.logger.debug(`query: ${query}`);
+      const stmt = this.db.prepare(query);
+      const result = stmt.all(whereData.values);
       return result;
     } catch (error) {
       this.logger.error(`Error finding record: ${error.message}`);
@@ -41,11 +81,80 @@ class Model {
     }
   }
 
+  static update(data = {}, {where = {}} = {}) {
+    if(Object.keys(data).length === 0) {
+      throw new Error('data is required for update');
+    }
+
+    let query = `UPDATE ${this.tableName} SET ${Object.keys(data).map(key => `${key} = ?`).join(', ')}`;
+    const whereData = this.prepareWhereClause(where);
+    if(whereData.clause) {
+      query += ` WHERE ${whereData.clause}`;
+    }
+    this.logger.debug(`query: ${query}`);
+    const stmt = this.db.prepare(query);
+    const result = stmt.run(Object.values(data).concat(whereData.values));
+    return result;
+  }
+
   static addDefaultValuesIfNotExists(data) {
     if(!data.created_at) {
       data.created_at = new Date().toISOString();
     }
   }
+
+  static prepareWhereClause(where) {
+    const conditions = [];
+    const values = [];
+    for(const key in where) {
+      if(key === 'AND' || key === 'OR') {
+        const nestedConditions = this.buildNestedConditions(where[key], key);
+        conditions.push(nestedConditions.clause);
+        values.push(...nestedConditions.values);
+      } else {
+        const pcResponse = this.prepareCondition(key, where[key]);
+        conditions.push(pcResponse.clause);
+        if(pcResponse.value !== null) {
+          if(Array.isArray(pcResponse.value)) {
+            values.push(...pcResponse.value);
+          } else {
+            values.push(pcResponse.value);
+          }
+        }
+      }
+    }
+    return { clause: `${conditions.join(' AND ')}`, values };
+  }
+
+  static buildNestedConditions(where, key) {
+    const conditions = [];
+    const values = [];
+
+    for(const condition of where) {
+      const nestedConditions = this.prepareWhereClause(condition);
+      conditions.push(nestedConditions.clause);
+      values.push(...nestedConditions.values);
+    }
+    
+    return { clause: `(${conditions.join(` ${key} `)})`, values };
+  }
+
+  static prepareCondition(key, value) {
+    if(value === null) {
+      return { clause: `${key} IS NULL`, value: null };
+    } else if(typeof value === 'object') {
+      const op = Object.keys(value)[0];
+      const opValue = value[op];
+      if(op === 'IN' || op === 'NOT IN') {
+        return { clause: `${key} ${op} (${opValue.map(() => '?').join(', ')})`, value: opValue };
+      } else {
+        return { clause: `${key} ${op} ?`, value: opValue };
+      }
+    } else {
+      return { clause: `${key} = ?`, value };
+    }
+  }
+
 }
 
 module.exports = Model;
