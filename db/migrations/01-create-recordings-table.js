@@ -1,11 +1,11 @@
 /**
- * Initial schema migration
+ * Create recordings table
  */
 module.exports = {
   id: 1,
-  name: 'initial_schema',
+  name: 'create_recordings_table',
   sql: `
-    CREATE TABLE IF NOT EXISTS recordings (
+    CREATE TABLE recordings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       filename TEXT NOT NULL,
       filepath TEXT NOT NULL,

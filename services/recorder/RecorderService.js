@@ -1,37 +1,21 @@
 const ffmpeg = require('fluent-ffmpeg');
 const fs = require('fs');
 const path = require('path');
-const { addRecording } = require('../../db/database');
-const mqttController = require('../../mqtt/mqttController');
+const Recording = require('../../model/Recording');
 const constants = require('../../config/constants');
 const { createLogger } = require('../../utils/logger');
+const { Tail } = require('tail'); 
 
 const logger = createLogger('Recorder');
 
 class RecorderService {
   constructor() {
     this.rtspUrl = constants.getRtspUrl();
-    this.basePath = path.join(__dirname, '../../storage/documents/CCTV Recordings');
+    this.basePath = path.join(__dirname, `../../${constants.recordingsFolder}`);
     this.outputDir = null;
     this.isRecording = false;
     this.ffmpegCommand = null;
-    this.topics = mqttController.getTopics();
-  }
-
-  /**
-   * Initialize the recorder service
-   */
-  async initialize() {
-    try {
-      logger.info('Initializing recorder service...');
-      
-      
-      logger.info('Recorder service initialized successfully');
-      return true;
-    } catch (error) {
-      logger.error(`Failed to initialize recorder service: ${error.message}`);
-      return false;
-    }
+    this.segmentTail = null;
   }
 
   /**
@@ -45,8 +29,7 @@ class RecorderService {
 
     try {
       this.isRecording = true;
-      
-      this._recordClip(60);
+      this._recordClip();
       logger.success('Recording started successfully');
     } catch (error) {
       this.isRecording = false;
@@ -55,89 +38,145 @@ class RecorderService {
   }
 
   /**
-   * Record an hourly clip
+   * Record clip with synchronized segments
    */
-  _recordClip(durationInSeconds) {
+  _recordClip() {
     const startTime = new Date();
-    const dateString = startTime.toISOString().split('T')[0]; // Date string for folder organization
-    const dayFolder = path.join(this.basePath, dateString);
     
-    if (!fs.existsSync(dayFolder)) {
-      fs.mkdirSync(dayFolder, { recursive: true });
-    }
-
-    const startEpoch = startTime.getTime();
-    const filename = `clip_${startEpoch}.mp4`;
-    const outputPath = path.join(dayFolder, filename);
+    logger.info(`Starting recording at ${startTime.toISOString()}`);
     
-    logger.info(`Starting recording after ${startEpoch}`);
+    const segmentListPath = path.join(this.basePath, 'segments.csv');
+    const segmentPattern = path.join(this.basePath, 'segment_%Y-%m-%d_%H-%M-%S.mp4');
+    const segmentDuration = constants.recordingSegmentDurationInSeconds;
     
     this.ffmpegCommand = ffmpeg(this.rtspUrl)
-      .addOptions([
-        '-c:v copy', 
-        '-c:a aac', 
-        '-b:a 128k', 
-        '-f mp4', 
-        '-movflags frag_keyframe+empty_moov', 
+      .inputOptions([
+        '-re',
+        '-rtsp_transport tcp',
+        '-timeout 5000000'
       ])
-      .duration(`${durationInSeconds}`)  
       .outputOptions([
+        '-c:v copy',
+        '-c:a aac',
+        '-b:a 128k',
+        '-f segment',
+        `-segment_time ${segmentDuration}`,
+        '-segment_atclocktime 1',
+        '-segment_format mp4',
+        '-segment_list_size 0',
+        '-segment_list_flags +live',
+        '-segment_wrap 0',
+        '-segment_start_number 0',
         '-reset_timestamps 1',
-        '-timestamp now'
+        '-segment_time_delta 0.1',
+        '-avoid_negative_ts 1',
+        '-segment_list_type csv',
+        '-strftime 1',
+        `-segment_list ${segmentListPath}`
       ])
       .on('start', (commandLine) => {
-        logger.info(`Spawned FFmpeg for ${startEpoch} with command: ${commandLine}`);
+        logger.info(`Spawned FFmpeg with command: ${commandLine}`);
       })
       .on('progress', (progress) => {
-        logger.debug(`Processing ${startEpoch}: ${JSON.stringify(progress)}% done`);
-        const currentDate = new Date().toISOString().split('T')[0];
-        if (currentDate !== dateString) {
-          logger.info('Day changed, stopping current recording and starting new one');
-          if (this.ffmpegCommand) {
-            this.ffmpegCommand.kill();
-            this.ffmpegCommand = null;
-          }
-          this._recordClip(durationInSeconds);
-        }        
+        logger.debug(`Processing: ${JSON.stringify(progress)}% done`);
       })
       .on('end', async () => {
-        logger.success(`Recording for ${startEpoch} finished`);
-        logger.info(`File saved to: ${outputPath}`);
+        logger.success('Recording session finished');
         
-        try {
-          const recordingData = await addRecording(filename, outputPath, dateString);
-          logger.info(`Recording data saved to database with ID: ${recordingData.id}`);
-          
-          await mqttController.publish(this.topics.NEW_RECORDING, {
-            id: recordingData.id,
-          });
-          
-          logger.info(`Published recording info to MQTT topic: ${this.topics.NEW_RECORDING}`);
-          
-          this._recordClip(durationInSeconds);
-          
-        } catch (error) {
-          logger.error(`Error after recording completion: ${error.message}`);
-        }
+        this._recordClip();
       })
       .on('error', (err, stdout, stderr) => {
         logger.error(`Error during recording: ${err.message}`);
-        logger.debug('FFmpeg stdout:', stdout);
-        logger.debug('FFmpeg stderr:', stderr);
+        logger.error('FFmpeg stdout:', stdout);
+        logger.error('FFmpeg stderr:', stderr);
         
-        this._recordClip(durationInSeconds);
+        setTimeout(() => {
+          this._recordClip();
+        }, 5000);
       })
-      .saveToFile(outputPath);
+      .output(segmentPattern);
+
+    this.ffmpegCommand.run();
+
+    this._watchSegmentList(segmentListPath);
   }
+
+  /**
+   * Process a new segment
+   */
+  _processNewSegment(filename) {
+    try {
+      const dateString = filename.split('_')[1];
+      const dayFolderPath = path.join(this.basePath, dateString);
+
+      if (!fs.existsSync(dayFolderPath)) {
+        fs.mkdirSync(dayFolderPath, { recursive: true });
+      }
+
+      const oldFilePath = path.join(this.basePath, filename);
+      const newFilePath = path.join(dayFolderPath, filename);
+
+      fs.renameSync(oldFilePath, newFilePath);
+
+      const recordingData = {
+        filename: filename,
+        filepath: newFilePath,
+        date: dateString
+      };
+
+      const createResult = Recording.create(recordingData);
+      logger.info(`Recording data saved to database with ID: ${createResult.lastInsertRowid}`);
+    } catch (error) {
+      logger.error(`Error processing new segment: ${error.message}`);
+    }
+  }
+
+/**
+ * Watch the segment list CSV file for appended lines using tail
+ */
+_watchSegmentList(segmentListPath) {
+  if (!fs.existsSync(segmentListPath)) {
+    fs.writeFileSync(segmentListPath, ''); // create the file if it doesn't exist
+  }
+
+  const tail = new Tail(segmentListPath, {
+    fromBeginning: false,
+    follow: true,
+    useWatchFile: true
+  });
+
+  tail.on('line', (line) => {
+    try {
+      const [filename] = line.trim().split(',');
+      if (filename) {
+        this._processNewSegment(filename);
+      }
+    } catch (err) {
+      logger.error(`Error processing tailed line: ${err.message}`);
+    }
+  });
+
+  tail.on('error', (error) => {
+    logger.error(`Tail error: ${error.message}`);
+  });
+
+  this.segmentTail = tail;
+}
 
   /**
    * Stop the recording process
    */
-  async stop() {
+  stop() {
     if (this.ffmpegCommand) {
-      this.ffmpegCommand.kill();
+      this.ffmpegCommand.kill('SIGTERM');
       this.ffmpegCommand = null;
     }
+    
+    if (this.segmentTail) {
+      this.segmentTail.unwatch();
+      this.segmentTail = null;
+    }
+    
     this.isRecording = false;
     logger.info('Recorder service stopped');
   }

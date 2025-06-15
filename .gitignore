@@ -9,8 +9,12 @@ ffmpeg.log
 
 dist/
 
+# Recordings
+CCTV_Recordings/
+
 # Database files
-db/recordings.db
+db/recordings.db*
+
 
 test.js
 

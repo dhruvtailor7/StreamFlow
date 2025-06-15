@@ -1,6 +1,6 @@
 # CCTV Recorder Service with Google Drive Integration
 
-This service records CCTV footage from an RTSP stream, saves hourly clips, and uploads them to Google Drive. It uses a modular architecture with separate recorder and uploader services that communicate via MQTT.
+This service records CCTV footage from an RTSP stream, saves clips, and uploads them to Google Drive. It uses a modular architecture with separate recorder and uploader services that communicate via MQTT.
 
 ## Architecture
 
@@ -80,22 +80,9 @@ Update the MQTT configuration in `.env` if using a remote broker.
 npm install
 ```
 
-## Configuration
+## Environment Variables
 
-1. Create a `.env` file in the project root with the following variables:
-   ```
-   # MQTT Configuration
-   MQTT_HOST=localhost
-   MQTT_PORT=1883
-   
-   # RTSP Configuration (from constants.js)
-   RTSP_USERNAME=your_username
-   RTSP_PASSWORD=your_password
-   RTSP_IP=192.168.1.6
-   RTSP_PORT=5543
-   ```
-
-2. Update the RTSP URL and other settings in the `config/constants.js` file as needed.
+1. Create a `.env` file in the project root. Look at the `.env.eample` for the variables that needs to be defined.
 
 ## Usage
 
@@ -128,8 +115,8 @@ node index.js uploader
 ## How It Works
 
 1. **Recorder Service**:
-   - Records hourly clips from the RTSP stream
-   - Stores recording metadata in SQLite database
+   - Records clips from the RTSP stream in parts.
+   - Stores part recordings in folder and its corresponding metadata in SQLite database
    - Sends MQTT message when recording is completed
 
 2. **Uploader Service**:
@@ -141,10 +128,18 @@ node index.js uploader
 ## Google Drive Structure
 
 Recordings in Google Drive will be organized as:
+
 - CCTV Recordings (main folder)
   - 2023-05-01 (date folder)
-    - clip_00.mp4 (hourly clips)
-    - clip_01.mp4
+    - segment_2025-06-15_15-40-00.mp4 (segments based on the segment duration from env)
+    - segment_2025-06-15_16-40-00.mp4 
     - ...
   - 2023-05-02
     - ... 
+
+
+## Future Improvements
+
+- Add support for other cloud providers for upload.
+- Add support for recording from multiple streams.
+- Integrate Docker for local development.

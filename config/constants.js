@@ -2,28 +2,39 @@
 require('dotenv').config();
 
 // RTSP Configuration
-const username = process.env.RTSP_USERNAME;
-const password = process.env.RTSP_PASSWORD;
-const rtspIp = process.env.RTSP_IP;
-const rtspPort = process.env.RTSP_PORT;
+const rtspUrl = process.env.RTSP_URL;
 
 // MQTT Configuration
 const mqttHost = process.env.MQTT_HOST;
 const mqttPort = process.env.MQTT_PORT;
+const recordingSegmentDurationInSeconds = process.env.RECORDING_SEGMENT_DURATION_IN_SECONDS || 3600;
 
 const email = process.env.EMAIL
 
-if (!username || !password || !rtspIp || !rtspPort || !mqttHost || !mqttPort || !email) {
-  throw new Error('All environment variables are required');
+const requiredEnvVars = [email];
+
+if(!rtspUrl) {
+  requiredEnvVars.push(rtspIp, rtspPort);
+} else {
+  requiredEnvVars.push(rtspUrl);
+}
+
+if (requiredEnvVars.some(envVar => !envVar)) {
+  const missingEnvVars = requiredEnvVars.filter(envVar => !envVar);
+  throw new Error(`Missing environment variables: ${missingEnvVars.join(', ')}`);
+}
+
+function getRtspUrl() {
+  if(rtspUrl) {
+    return rtspUrl;
+  } 
 }
 
 module.exports = {
-  username,
-  password,
-  rtspIp,
-  rtspPort,
   email,
   mqttHost,
   mqttPort,
-  getRtspUrl: () => `rtsp://${username}:${encodeURIComponent(password)}@${rtspIp}:${rtspPort}/live/channel0`
+  recordingsFolder: "CCTV_Recordings",
+  recordingSegmentDurationInSeconds: recordingSegmentDurationInSeconds,
+  getRtspUrl
 };

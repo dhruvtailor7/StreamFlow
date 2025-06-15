@@ -1,56 +1,7 @@
-const Database = require('better-sqlite3');
-const path = require('path');
-const fs = require('fs');
-const migrationService = require('./migrationService');
 const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('Database');
 
-const dbDir = path.join(__dirname);
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
-}
-
-const dbPath = path.join(dbDir, 'recordings.db');
-const db = new Database(dbPath, { 
-  fileMustExist: false
-});
-
-db.pragma('journal_mode = WAL');
-db.pragma('synchronous = NORMAL');
-
-async function initDb() {
-  try {
-    await migrationService.runMigrations();
-    logger.success('Database initialized successfully');
-    return true;
-  } catch (error) {
-    logger.error(`Failed to initialize database: ${error.message}`);
-    throw error;
-  }
-}
-
-function addRecording(filename, filepath, date) {
-  try {
-    const stmt = db.prepare(`
-      INSERT INTO recordings (filename, filepath, date, created_at)
-      VALUES (?, ?, ?, datetime('now'))
-    `);
-    
-    const result = stmt.run(filename, filepath, date);
-    
-    logger.success(`Added recording to database with ID: ${result.lastInsertRowid}`);
-    return {
-      id: result.lastInsertRowid,
-      filename,
-      filepath,
-      date,
-    };
-  } catch (error) {
-    logger.error(`Error adding recording to database: ${error.message}`);
-    throw error;
-  }
-}
 
 function getRecordingById(id) {
   try {
@@ -102,24 +53,9 @@ function markAsUploaded(id, driveFileId, driveLink) {
   }
 }
 
-async function closeDb() {
-  try {
-    await migrationService.close();
-    
-    db.close();
-    logger.info('Main database connection closed');
-    return true;
-  } catch (error) {
-    logger.error(`Error during database closure: ${error.message}`);
-    throw error;
-  }
-}
 
 module.exports = {
-  initDb,
-  addRecording,
   getRecordingById,
   getPendingUploads,
   markAsUploaded,
-  closeDb
 }; 

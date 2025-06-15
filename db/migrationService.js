@@ -17,20 +17,14 @@ class MigrationService {
       fileMustExist: false 
     });
     
-    if (logger.debug) {
-      this.db.pragma('foreign_keys = ON');
-    }
-    
-    this.initialized = false;
-    
-    this.migrations = this._loadMigrations();
+    this.db.pragma('foreign_keys = ON');
   }
 
   /**
    * Load migrations from the migrations directory
    * @returns {Array} Array of migration objects
    */
-  _loadMigrations() {
+  _loadPendingMigrations(lastMigrationId) {
     try {
       const migrationsDir = path.join(__dirname, 'migrations');
       
@@ -42,14 +36,9 @@ class MigrationService {
       
       const migrationFiles = fs.readdirSync(migrationsDir)
         .filter(file => file.endsWith('.js'))
-        .sort();
+        .filter(file => parseInt(file.split('-')[0]) > lastMigrationId)
       
-      if (migrationFiles.length === 0) {
-        logger.info('No migration files found');
-        return [];
-      }
-      
-      logger.info(`Found ${migrationFiles.length} migration files`);
+      logger.info(`Found ${migrationFiles.length} pending migration files`);
       
       const migrations = migrationFiles.map(file => {
         const migrationPath = path.join(migrationsDir, file);
@@ -61,7 +50,7 @@ class MigrationService {
       return migrations;
     } catch (error) {
       logger.error(`Error loading migrations: ${error.message}`);
-      return [];
+      throw error;
     }
   }
 
@@ -136,39 +125,39 @@ class MigrationService {
    * @returns {Promise<void>}
    */
   async runMigrations() {
-    if (this.initialized) {
-      return Promise.resolve();
-    }
-    
     try {
       logger.info('Initializing migration service...');
       
       await this.initMigrationsTable();
-      
+
       const lastMigrationId = await this.getLastMigrationId();
       logger.info(`Last applied migration ID: ${lastMigrationId}`);
-      
-      const pendingMigrations = this.migrations.filter(m => m.id > lastMigrationId);
+
+      const pendingMigrations = this._loadPendingMigrations(lastMigrationId);
       
       if (pendingMigrations.length === 0) {
         logger.info('No pending migrations to apply');
       } else {
         logger.info(`Found ${pendingMigrations.length} pending migrations to apply`);
         
-          for (const migration of pendingMigrations) {
+        for (const migration of pendingMigrations) {
           await this.applyMigration(migration);
         }
         
         logger.success('All migrations applied successfully');
       }
       
-      this.initialized = true;
+      await this.close();
       return true;
     } catch (error) {
       logger.error(`Error running migrations: ${error.message}`);
       throw error;
     }
   }
+
+  /**
+   * TODO: Add Suppoet for Up and Down for specific version
+   */
 
   /**
    * Close the database connection
@@ -186,6 +175,4 @@ class MigrationService {
   }
 }
 
-const migrationService = new MigrationService();
-
-module.exports = migrationService; 
+module.exports = new MigrationService();
