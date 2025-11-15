@@ -61,9 +61,9 @@ async function start() {
     await migrationService.runMigrations();
     logger.success('Database migrated successfully');
     
-    // logger.info('Initializing MQTT connection...');
-    // await mqttController.connect();
-    // logger.success('MQTT connection established successfully');
+    logger.info('Initializing MQTT connection...');
+    await mqttController.connect();
+    logger.success('MQTT connection established successfully');
     
     if (mode === 'all' || mode === 'recorder') {
       startRecorder();

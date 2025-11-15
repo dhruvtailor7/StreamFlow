@@ -12,9 +12,9 @@
   "dependencies": {
     "@googleapis/drive": "^11.0.0",
     "better-sqlite3": "^8.7.0",
+    "chokidar": "^4.0.3",
     "dotenv": "^16.4.5",
     "fluent-ffmpeg": "^2.1.3",
-    "mqtt": "^5.10.4",
-    "tail": "^2.2.6"
+    "mqtt": "^5.10.4"
   }
 }

@@ -117,12 +117,11 @@ node index.js uploader
 1. **Recorder Service**:
    - Records clips from the RTSP stream in parts.
    - Stores part recordings in folder and its corresponding metadata in SQLite database
-   - Sends MQTT message when recording is completed
 
 2. **Uploader Service**:
-   - Listens for new recording messages via MQTT
+   - Cron which periodically check the table and process the pending uploads
    - Uploads recordings to Google Drive
-   - Updates the database with upload status
+   - Updates the database with upload status and links
    - Periodically checks for failed uploads and retries
 
 ## Google Drive Structure

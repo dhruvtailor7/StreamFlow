@@ -4,18 +4,20 @@ const path = require('path');
 const Recording = require('../../model/Recording');
 const constants = require('../../config/constants');
 const { createLogger } = require('../../utils/logger');
-const { Tail } = require('tail'); 
+const FileWatcherService = require('../watcher/FileWatcherService');
 
 const logger = createLogger('Recorder');
+
+const rootPrefix = '../..'
 
 class RecorderService {
   constructor() {
     this.rtspUrl = constants.getRtspUrl();
-    this.basePath = path.join(__dirname, `../../${constants.recordingsFolder}`);
+    this.basePath = path.join(__dirname, `${rootPrefix}/${constants.recordingsFolder}`);
     this.outputDir = null;
     this.isRecording = false;
     this.ffmpegCommand = null;
-    this.segmentTail = null;
+    this.unwatchSegments = null;
   }
 
   /**
@@ -44,35 +46,26 @@ class RecorderService {
     const startTime = new Date();
     
     logger.info(`Starting recording at ${startTime.toISOString()}`);
+
+    const segmentFormat = 'mkv'
     
-    const segmentListPath = path.join(this.basePath, 'segments.csv');
-    const segmentPattern = path.join(this.basePath, 'segment_%Y-%m-%d_%H-%M-%S.mp4');
+    const segmentPattern = path.join(this.basePath, `segment_%Y-%m-%d_%H-%M-%S.${segmentFormat}`);
     const segmentDuration = constants.recordingSegmentDurationInSeconds;
     
     this.ffmpegCommand = ffmpeg(this.rtspUrl)
       .inputOptions([
-        '-re',
         '-rtsp_transport tcp',
-        '-timeout 5000000'
       ])
       .outputOptions([
+        '-use_wallclock_as_timestamps 1',
         '-c:v copy',
-        '-c:a aac',
-        '-b:a 128k',
+        '-c:a copy',
         '-f segment',
-        `-segment_time ${segmentDuration}`,
-        '-segment_atclocktime 1',
-        '-segment_format mp4',
-        '-segment_list_size 0',
-        '-segment_list_flags +live',
-        '-segment_wrap 0',
-        '-segment_start_number 0',
         '-reset_timestamps 1',
-        '-segment_time_delta 0.1',
-        '-avoid_negative_ts 1',
-        '-segment_list_type csv',
+        `-segment_time ${segmentDuration}`,
+        `-segment_format ${segmentFormat}`,
+        '-segment_atclocktime 1',
         '-strftime 1',
-        `-segment_list ${segmentListPath}`
       ])
       .on('start', (commandLine) => {
         logger.info(`Spawned FFmpeg with command: ${commandLine}`);
@@ -82,30 +75,25 @@ class RecorderService {
       })
       .on('end', async () => {
         logger.success('Recording session finished');
-        
-        this._recordClip();
       })
       .on('error', (err, stdout, stderr) => {
         logger.error(`Error during recording: ${err.message}`);
         logger.error('FFmpeg stdout:', stdout);
         logger.error('FFmpeg stderr:', stderr);
-        
-        setTimeout(() => {
-          this._recordClip();
-        }, 5000);
       })
       .output(segmentPattern);
 
     this.ffmpegCommand.run();
 
-    this._watchSegmentList(segmentListPath);
+    this._watchSegments();
   }
 
   /**
    * Process a new segment
    */
-  _processNewSegment(filename) {
+  _processNewSegment(filepath) {
     try {
+      const filename = path.basename(filepath);
       const dateString = filename.split('_')[1];
       const dayFolderPath = path.join(this.basePath, dateString);
 
@@ -131,37 +119,15 @@ class RecorderService {
     }
   }
 
-/**
- * Watch the segment list CSV file for appended lines using tail
- */
-_watchSegmentList(segmentListPath) {
-  if (!fs.existsSync(segmentListPath)) {
-    fs.writeFileSync(segmentListPath, ''); // create the file if it doesn't exist
+  /**
+   * Watch the segments
+   */
+  _watchSegments() {
+    this.unwatchSegments = FileWatcherService.watchNewFiles(this.basePath, (filepath) => {
+      logger.info('added: ', filepath)
+      this._processNewSegment(filepath)
+    })
   }
-
-  const tail = new Tail(segmentListPath, {
-    fromBeginning: false,
-    follow: true,
-    useWatchFile: true
-  });
-
-  tail.on('line', (line) => {
-    try {
-      const [filename] = line.trim().split(',');
-      if (filename) {
-        this._processNewSegment(filename);
-      }
-    } catch (err) {
-      logger.error(`Error processing tailed line: ${err.message}`);
-    }
-  });
-
-  tail.on('error', (error) => {
-    logger.error(`Tail error: ${error.message}`);
-  });
-
-  this.segmentTail = tail;
-}
 
   /**
    * Stop the recording process
@@ -172,9 +138,8 @@ _watchSegmentList(segmentListPath) {
       this.ffmpegCommand = null;
     }
     
-    if (this.segmentTail) {
-      this.segmentTail.unwatch();
-      this.segmentTail = null;
+    if (this.unwatchSegments) {
+      this.unwatchSegments()
     }
     
     this.isRecording = false;

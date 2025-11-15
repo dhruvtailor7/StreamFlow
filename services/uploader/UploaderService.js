@@ -134,13 +134,7 @@ class UploaderService {
   /**
    * Stop the uploader service
    */
-  async stop() {
-    
-    if (this.retryTimer) {
-      clearInterval(this.retryTimer);
-      this.retryTimer = null;
-    }
-    
+  async stop() {  
     logger.info('Uploader service stopped');
   }
 }
