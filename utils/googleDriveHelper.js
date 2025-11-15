@@ -88,7 +88,7 @@ async function uploadFileToDrive(filePath, folderName) {
     };
     
     const media = {
-      mimeType: 'video/mp4',
+      mimeType: 'video/mkv', //get from file
       body: fs.createReadStream(filePath)
     };
     

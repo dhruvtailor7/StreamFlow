@@ -123,7 +123,7 @@ class Model {
         }
       }
     }
-    return { clause: `${conditions.join(' AND ')}`, values };
+    return { clause: `(${conditions.join(' AND ')})`, values };
   }
 
   static buildNestedConditions(where, key) {

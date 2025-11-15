@@ -75,12 +75,12 @@ class UploaderService {
       const rows = Recording.find({
         limit: this.batchSize,
         where: {
-          id: { '>': this.lastUploadedId },
-          OR: [
-            { upload_status: Recording.UPLOAD_STATUS.PENDING },
-            // { upload_status: Recording.UPLOAD_STATUS.FAILED, retry_count: { '<=': this.maxRetries } }
-          ],
-          lock_id: null
+            id: { '>': this.lastUploadedId },
+            OR: [
+              { upload_status: Recording.UPLOAD_STATUS.PENDING },
+              { upload_status: Recording.UPLOAD_STATUS.FAILED, retry_count: { '<=': this.maxRetries } }
+            ],
+            lock_id: null
         }
       });
     
