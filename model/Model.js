@@ -99,7 +99,7 @@ class Model {
 
   static addDefaultValuesIfNotExists(data) {
     if(!data.created_at) {
-      data.created_at = new Date().toISOString();
+      data.created_at = new Date().toUTCString();
     }
   }
 

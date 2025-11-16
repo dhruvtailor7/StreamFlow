@@ -7,6 +7,9 @@ const rtspUrl = process.env.RTSP_URL;
 // MQTT Configuration
 const mqttHost = process.env.MQTT_HOST;
 const mqttPort = process.env.MQTT_PORT;
+const mqttTopics = {
+  NEW_RECORDING: 'cctv/recordings/new',
+}
 const recordingSegmentDurationInSeconds = process.env.RECORDING_SEGMENT_DURATION_IN_SECONDS || 900;
 
 const email = process.env.EMAIL
@@ -34,6 +37,7 @@ module.exports = {
   email,
   mqttHost,
   mqttPort,
+  mqttTopics,
   recordingsFolder: "CCTV_Recordings",
   recordingSegmentDurationInSeconds: recordingSegmentDurationInSeconds,
   getRtspUrl

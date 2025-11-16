@@ -2,7 +2,7 @@ require('dotenv').config();
 
 const RecorderService = require('./services/recorder/RecorderService');
 const UploaderService = require('./services/uploader/UploaderService');
-const mqttController = require('./mqtt/mqttController')
+const mqttService = require('./services/mqtt/MqttService');
 const migrationService = require('./db/migrationService');
 const DatabaseService = require('./services/database/DatabaseService');
 const { systemLogger: logger } = require('./utils/logger');
@@ -24,7 +24,7 @@ async function shutdown(signal) {
       logger.info('Uploader service stopped successfully');
     }
     
-    await mqttController.disconnect();
+    await mqttService.disconnect();
     
     DatabaseService.disconnect();
     
@@ -63,7 +63,7 @@ async function start() {
     logger.success('Database migrated successfully');
     
     logger.info('Initializing MQTT connection...');
-    await mqttController.connect();
+    await mqttService.connect();
     logger.success('MQTT connection established successfully');
     
     if (mode === 'all' || mode === 'recorder') {

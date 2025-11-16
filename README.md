@@ -112,17 +112,27 @@ node uploader.js
 node index.js uploader
 ```
 
+### Running uploader cron:
+
+```bash
+node uploaderCron.js
+```
+
 ## How It Works
 
 1. **Recorder Service**:
    - Records clips from the RTSP stream in parts.
-   - Stores part recordings in folder and its corresponding metadata in SQLite database
+   - Stores part recordings in folder and its corresponding metadata in SQLite database.
 
 2. **Uploader Service**:
-   - Cron which periodically check the table and process the pending uploads
-   - Uploads recordings to Google Drive
-   - Updates the database with upload status and links
-   - Periodically checks for failed uploads and retries
+   - Subscribes to new recording topic.
+   - Uploads recordings to Google Drive when ever recording is generated.
+   - Updates the database with upload status and links.
+
+3. **Uploader Cron**:
+   - Cron which periodically check the table and process the pending/failed uploads.
+   - Uploads recordings to Google Drive.
+   - Updates the database with upload status and links.
 
 ## Google Drive Structure
 
@@ -139,6 +149,11 @@ Recordings in Google Drive will be organized as:
 
 ## Future Improvements
 
-- Add support for other cloud providers for upload.
-- Add support for recording from multiple streams.
 - Integrate Docker for local development.
+
+#### Recorder
+  - Add support for other cloud providers for upload.
+  - Add support for recording from multiple streams.
+
+#### Uploader
+  - Batch upload to google drive keeping in mind the rate limits

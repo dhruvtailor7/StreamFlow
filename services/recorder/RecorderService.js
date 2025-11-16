@@ -5,6 +5,7 @@ const Recording = require('../../model/Recording');
 const constants = require('../../config/constants');
 const { createLogger } = require('../../utils/logger');
 const FileWatcherService = require('../watcher/FileWatcherService');
+const MqttService = require('../mqtt/MqttService');
 
 const logger = createLogger('Recorder');
 
@@ -45,7 +46,7 @@ class RecorderService {
   _recordClip() {
     const startTime = new Date();
     
-    logger.info(`Starting recording at ${startTime.toISOString()}`);
+    logger.info(`Starting recording at ${startTime.toUTCString()}`);
 
     const segmentFormat = 'mkv'
     
@@ -91,7 +92,7 @@ class RecorderService {
   /**
    * Process a new segment
    */
-  _processNewSegment(filepath) {
+  async _processNewSegment(filepath) {
     try {
       const filename = path.basename(filepath);
       const dateString = filename.split('_')[1];
@@ -113,7 +114,9 @@ class RecorderService {
       };
 
       const createResult = Recording.create(recordingData);
-      logger.info(`Recording data saved to database with ID: ${createResult.lastInsertRowid}`);
+      const newRecordingId = createResult.lastInsertRowid
+      await MqttService.publish(constants.mqttTopics.NEW_RECORDING, {recordingId: newRecordingId})
+      logger.info(`Recording data saved to database with ID: ${newRecordingId}`);
     } catch (error) {
       logger.error(`Error processing new segment: ${error.message}`);
     }
