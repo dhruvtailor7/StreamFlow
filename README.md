@@ -28,17 +28,19 @@ The application uses a simple migration system to manage database schema changes
 To add a new migration:
 
 1. Create a new file in the `db/migrations` directory with format `XX-description.js` where XX is the next sequential number
-2. The file should export an object with `id`, `name`, and `sql` properties
+2. The file should export an object with `id`, `name`, and `sql` properties. The migrations will be tracked and applied in the order of `id`.
 3. Example:
 
 ```javascript
 module.exports = {
   id: 3,
   name: 'add_new_column',
-  sql: `
+  up: [`
     ALTER TABLE recordings 
     ADD COLUMN new_column TEXT;
-  `
+  `],
+  down: [`ALTER TABLE recordings 
+    DROP COLUMN new_column TEXT;`]
 };
 ```
 

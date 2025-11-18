@@ -5,6 +5,9 @@ const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('Migration');
 
+const UP = 'up';
+const DOWN = 'down';
+
 class MigrationService {
   constructor() {
     this.dbDir = path.join(__dirname);
@@ -56,9 +59,9 @@ class MigrationService {
 
   /**
    * Initialize the migrations table
-   * @returns {Promise<void>}
+   * @returns {boolean}
    */
-  async initMigrationsTable() {
+  initMigrationsTable() {
     try {
       this.db.prepare(`
         CREATE TABLE IF NOT EXISTS migrations (
@@ -76,9 +79,9 @@ class MigrationService {
 
   /**
    * Get the last applied migration ID
-   * @returns {Promise<number>} The last migration ID or 0 if none
+   * @returns {number} The last migration ID or 0 if none
    */
-  async getLastMigrationId() {
+  getLastMigrationId() {
     try {
       const stmt = this.db.prepare(`
         SELECT id FROM migrations
@@ -97,17 +100,19 @@ class MigrationService {
   /**
    * Apply a migration
    * @param {Object} migration - The migration to apply
-   * @returns {Promise<void>}
+   * @param {string} type - 'up' or 'down'
+   * @returns {boolean}
    */
-  async applyMigration(migration) {
+  applyMigration(migration, type) {
     try {
       const transaction = this.db.transaction(() => {
-        this.db.exec(migration.sql);
-        
-        this.db.prepare(`
-          INSERT INTO migrations (id, name, applied_at)
-          VALUES (?, ?, datetime('now'))
-        `).run(migration.id, migration.name);
+        if(type === UP) {
+          this.applyUpMigration(migration);
+        } else if(type === DOWN) {
+          this.applyDownMigration(migration);
+        } else {
+          throw new Error(`Invalid migration type: ${type}`);
+        }
       });
       
       transaction();
@@ -121,16 +126,44 @@ class MigrationService {
   }
 
   /**
+   * Apply up migration
+   * @param {object} migration 
+   */
+  applyUpMigration(migration) {
+    for (const sql of migration.up) {
+      this.db.prepare(sql).run();
+    }
+    
+    this.db.prepare(`
+      INSERT INTO migrations (id, name, applied_at)
+      VALUES (?, ?, ?)
+    `).run(migration.id, migration.name, new Date().toISOString());
+  }
+
+  /**
+   * Apply down migration
+   * @param {object} migration 
+   */
+  applyDownMigration(migration) {
+    for (const sql of migration.down) {
+      this.db.prepare(sql).run();
+    }
+    
+    this.db.prepare(`
+      DELETE FROM migrations WHERE id = ?
+    `).run(migration.id);
+  }
+
+  /**
    * Run all pending migrations
    * @returns {Promise<void>}
    */
-  async runMigrations() {
+  runMigrations(type = UP) {
     try {
       logger.info('Initializing migration service...');
-      
-      await this.initMigrationsTable();
+      this.initMigrationsTable();
 
-      const lastMigrationId = await this.getLastMigrationId();
+      const lastMigrationId = this.getLastMigrationId();
       logger.info(`Last applied migration ID: ${lastMigrationId}`);
 
       const pendingMigrations = this._loadPendingMigrations(lastMigrationId);
@@ -141,13 +174,13 @@ class MigrationService {
         logger.info(`Found ${pendingMigrations.length} pending migrations to apply`);
         
         for (const migration of pendingMigrations) {
-          await this.applyMigration(migration);
+          this.applyMigration(migration, type);
         }
         
         logger.success('All migrations applied successfully');
       }
       
-      await this.close();
+      this.close();
       return true;
     } catch (error) {
       logger.error(`Error running migrations: ${error.message}`);
@@ -156,14 +189,40 @@ class MigrationService {
   }
 
   /**
-   * TODO: Add Suppoet for Up and Down for specific version
+   * Apply specific migration by ID
+   * @param {number} migrationId 
+   * @param {string} type 
+   * @returns {boolean}
    */
+  runMigration(migrationId, type = UP) {
+    try {
+      logger.info(`Initializing migration service for migration ID ${migrationId}...`);
+      this.initMigrationsTable();
+      
+      const pendingMigrations = this._loadPendingMigrations(0)
+        .filter(mig => mig.id === migrationId);
+
+      if (pendingMigrations.length === 0) {
+        logger.info(`No migration found with ID ${migrationId}`);
+      } else {
+        const migration = pendingMigrations[0];
+        this.applyMigration(migration, type);
+        logger.success(`Migration ${migrationId} applied successfully`);
+      }
+      
+      this.close();
+      return true;
+    } catch (error) {
+      logger.error(`Error running migration ${migrationId}: ${error.message}`);
+      throw error;
+    }
+  }
 
   /**
    * Close the database connection
-   * @returns {Promise<void>}
+   * @returns {Promise<boolean>}
    */
-  async close() {
+  close() {
     try {
       this.db.close();
       logger.info('Migration service database connection closed');

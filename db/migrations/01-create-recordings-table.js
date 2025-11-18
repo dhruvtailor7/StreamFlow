@@ -4,7 +4,7 @@
 module.exports = {
   id: 1,
   name: 'create_recordings_table',
-  sql: `
+  up: [`
     CREATE TABLE recordings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       filename TEXT NOT NULL,
@@ -19,5 +19,8 @@ module.exports = {
       drive_link TEXT,
       uploaded_at DATETIME
     )
-  `
+  `],
+  down: [
+    `DROP TABLE IF EXISTS recordings`
+  ]
 }; 
