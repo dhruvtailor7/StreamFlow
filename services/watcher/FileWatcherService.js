@@ -3,6 +3,11 @@ const { createLogger } = require('../../utils/logger');
 
 const logger = createLogger('FileWatcher');
 
+const isAndroid = (() => {
+  // Termux sets $PREFIX to /data/data/com.termux/files/usr
+  return process.platform === 'linux' && (process.env.HOME)?.startsWith('/data/data/com.termux');
+})();
+
 class FileWatcher {
     static instance = null;
     constructor() {
@@ -18,7 +23,15 @@ class FileWatcher {
     watchNewFiles(dir, cb) {
         if(!this.subscriptionMap[dir]) {
             logger.debug(`creating new subscription for ${dir}`)
-            const subscription = chokidar.watch(dir, {depth: 0, ignoreInitial: true, awaitWriteFinish: true})
+            const subscription = chokidar.watch(dir, {
+                depth: 0,
+                ignoreInitial: true,
+                // Use polling on Android, else use awaitWriteFinish normally
+                usePolling: isAndroid,
+                awaitWriteFinish: isAndroid ? false : true,
+                interval: isAndroid ? 100 : undefined, // only used if polling
+                binaryInterval: isAndroid ? 300 : undefined
+            });
             this.subscriptionMap[dir] = {subscription, callbacks: new Set([cb])}
             subscription.on('add', (path) => {
                 for(const fn of this.subscriptionMap[dir].callbacks) {

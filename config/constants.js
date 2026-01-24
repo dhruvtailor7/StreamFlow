@@ -40,5 +40,6 @@ module.exports = {
   mqttTopics,
   recordingsFolder: "CCTV_Recordings",
   recordingSegmentDurationInSeconds: recordingSegmentDurationInSeconds,
+  recordingFormat: process.env.RECORDING_FORMAT || 'mkv',
   getRtspUrl
 };
