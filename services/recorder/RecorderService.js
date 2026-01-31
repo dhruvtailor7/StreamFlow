@@ -4,32 +4,28 @@ const path = require('path');
 const Recording = require('../../model/Recording');
 const constants = require('../../config/constants');
 const { createLogger } = require('../../utils/logger');
-const FileWatcherService = require('../watcher/FileWatcherService');
+// const FileWatcherService = require('../watcher/FileWatcherService');
 const MqttService = require('../mqtt/MqttService');
 const TailFileService = require('../watcher/TailFileService');
 
 const logger = createLogger('Recorder');
 
-const rootPrefix = '../../../storage/documents'
-
 class RecorderService {
   constructor() {
     this.rtspUrl = constants.getRtspUrl();
-    this.basePath = path.join(__dirname, `${rootPrefix}/${constants.recordingsFolder}`);
+    this.basePath = constants.recordingsPath;
     this.outputDir = null;
     this.isRecording = false;
     this.ffmpegCommand = null;
     this.unwatchSegments = null;
 
     this.segmentListFile = path.join(this.basePath, `segment_list.txt`);
-
-    this.ensureSegmentListFileExists();
   }
 
   /**
    * Ensure segment_list.txt exists before using it
    */
-  ensureSegmentListFileExists() {
+  _ensureSegmentListFileExists() {
     try {
       // Check if the file exists
       if (!fs.existsSync(this.segmentListFile)) {
@@ -53,6 +49,7 @@ class RecorderService {
 
     try {
       this.isRecording = true;
+      this._ensureSegmentListFileExists();
       this._recordClip();
       this._watchSegments();
       logger.success('Recording started successfully');
@@ -115,6 +112,7 @@ class RecorderService {
       } else {
         logger.error(`FFmpeg process exited with code ${code}`);
       }
+      
       this.isRecording = false;
     });
 
@@ -141,15 +139,22 @@ class RecorderService {
 
       fs.renameSync(oldFilePath, newFilePath);
 
+      const { size } = fs.statSync(newFilePath);
+
       const recordingData = {
         filename: filename,
         filepath: newFilePath,
+        filesize: size,
         date: dateString
       };
 
       const createResult = Recording.create(recordingData);
       const newRecordingId = createResult.lastInsertRowid
-      await MqttService.publish(constants.mqttTopics.NEW_RECORDING, {recordingId: newRecordingId})
+      await MqttService.publish(constants.mqttTopics.NEW_RECORDING, {
+        recordingId: newRecordingId,
+        filepath: recordingData.filepath,
+        filesize: recordingData.filesize
+      })
       logger.info(`Recording data saved to database with ID: ${newRecordingId}`);
     } catch (error) {
       logger.error(`Error processing new segment: ${error.message}`);

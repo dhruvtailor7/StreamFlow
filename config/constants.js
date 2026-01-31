@@ -1,6 +1,8 @@
 // Constants for CCTV recorder service
 require('dotenv').config();
 
+const path = require('path')
+
 // RTSP Configuration
 const rtspUrl = process.env.RTSP_URL;
 
@@ -38,7 +40,8 @@ module.exports = {
   mqttHost,
   mqttPort,
   mqttTopics,
-  recordingsFolder: "CCTV_Recordings",
+  maxRecordingsFolderSizeInGB: Number(process.env.MAX_RECORDINGS_FOLDER_SIZE_IN_GB) || 2,
+  recordingsPath: path.join(process.env.RECORDING_BASE_DIR, "CCTV_Recordings"),
   recordingSegmentDurationInSeconds: recordingSegmentDurationInSeconds,
   recordingFormat: process.env.RECORDING_FORMAT || 'mkv',
   getRtspUrl

@@ -6,6 +6,7 @@ const mqttService = require('./services/mqtt/MqttService');
 const migrationService = require('./db/migrationService');
 const DatabaseService = require('./services/database/DatabaseService');
 const { systemLogger: logger } = require('./utils/logger');
+const CleanUpService = require('./services/cleanup/CleanUpService');
 
 const args = process.argv.slice(2);
 const mode = args[0] || 'all'; // Default to running both services
@@ -17,6 +18,11 @@ async function shutdown(signal) {
     if (recorderService) {
       recorderService.stop();
       logger.info('Recorder service stopped successfully');
+    }
+
+    if (cleanupService) {
+      await cleanupService.stop();
+      logger.info('Cleanup service stopped successfully');
     }
     
     if (uploaderService) {
@@ -40,6 +46,7 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 let recorderService = null;
+let cleanupService = null;
 let uploaderService = null;
 
 function startRecorder() {
@@ -48,9 +55,14 @@ function startRecorder() {
   logger.success('Recorder service started');
 }
 
-function startUploader() {
+async function startCleaner() {
+  cleanupService = new CleanUpService();
+  await cleanupService.initialize();
+}
+
+async function startUploader() {
   uploaderService = new UploaderService();
-  uploaderService.initialize();
+  await uploaderService.initialize();
   logger.success('Uploader service started');
 }
 
@@ -68,10 +80,11 @@ async function start() {
     
     if (mode === 'all' || mode === 'recorder') {
       startRecorder();
+      await startCleaner();
     }
     
     if (mode === 'all' || mode === 'uploader') {
-      startUploader();
+      await startUploader();
     }
 
     logger.success('Startup complete');

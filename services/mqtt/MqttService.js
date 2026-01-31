@@ -77,7 +77,7 @@ class MqttService {
     })
   }
 
-  subscribe(topic, callback) {
+subscribe(topic, callback) {
     return new Promise((resolve, reject) => {
       if (!this.subscriptions[topic]) {
         this.subscriptions[topic] = new Set();

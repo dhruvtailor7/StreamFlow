@@ -9,6 +9,12 @@ class Recording extends Model {
     FAILED: 2
   }
 
+  static STATUS = {
+    ACTIVE: 0,
+    DELETING: 1,
+    DELETED: 2
+  }
+
 }
 
 module.exports = Recording;

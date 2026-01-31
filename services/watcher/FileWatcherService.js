@@ -11,13 +11,12 @@ const isAndroid = (() => {
 class FileWatcher {
     static instance = null;
     constructor() {
-        if(!FileWatcher.instance) {
-            FileWatcher.instance = this
+        if (FileWatcher.instance) {
+            return FileWatcher.instance
         }
 
         this.subscriptionMap = {}
-
-        return FileWatcher.instance
+        FileWatcher.instance = this
     }
 
     watchNewFiles(dir, cb) {

@@ -136,6 +136,10 @@ node uploaderCron.js
    - Uploads recordings to Google Drive.
    - Updates the database with upload status and links.
 
+4. **Cleanup Service**:
+   - Monitors total storage used by recordings and deletes oldest files when the size exceeds the configured threshold.
+   - Updates the database to mark recordings as DELETED after removal.
+
 ## Google Drive Structure
 
 Recordings in Google Drive will be organized as:

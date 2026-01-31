@@ -56,13 +56,15 @@ class Model {
     }
   }
 
-  static find({columns = '*', limit, offset, where = {}}) {
+  static find({columns = '*', limit, offset, where = {}, orderBy = []}) {
     try {
       let query = `SELECT ${columns} FROM ${this.tableName}`;
       const whereData = this.prepareWhereClause(where);
       if(whereData.clause) {
         query += ` WHERE ${whereData.clause}`;
       }
+
+      query += this.prepareOrderBy(orderBy);
 
       if(limit) {
         query += ` LIMIT ${limit}`;
@@ -153,6 +155,24 @@ class Model {
     } else {
       return { clause: `${key} = ?`, value };
     }
+  }
+
+  static prepareOrderBy(orderBy = []) {
+    if (!Array.isArray(orderBy) || orderBy.length === 0) {
+      return '';
+    }
+
+    const directions = ['ASC', 'DESC'];
+
+    const clauses = orderBy
+      .filter(([_, direction]) =>
+        directions.includes(direction.toUpperCase())
+      )
+      .map(([column, direction]) =>
+        `${column} ${direction.toUpperCase()}`
+      );
+
+    return clauses.length ? ` ORDER BY ${clauses.join(', ')}` : '';
   }
 
 }
