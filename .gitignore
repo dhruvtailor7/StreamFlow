@@ -15,6 +15,9 @@ CCTV_Recordings/
 # Database files
 db/recordings.db*
 
+logs/
+
+recorder.pid
 
 test.js
 

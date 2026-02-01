@@ -14,12 +14,16 @@ class RecorderService {
   constructor() {
     this.rtspUrl = constants.getRtspUrl();
     this.basePath = constants.recordingsPath;
-    this.outputDir = null;
-    this.isRecording = false;
-    this.ffmpegCommand = null;
-    this.unwatchSegments = null;
 
     this.segmentListFile = path.join(this.basePath, `segment_list.txt`);
+
+    this.ffmpegProcess = null;
+    this.isRecording = false;
+    this.isStopping = false;
+    this.restartAttempts = 0;
+    this.lastStartTime = 0;
+
+    this.unwatchSegments = null;
   }
 
   /**
@@ -27,9 +31,7 @@ class RecorderService {
    */
   _ensureSegmentListFileExists() {
     try {
-      // Check if the file exists
       if (!fs.existsSync(this.segmentListFile)) {
-        // Create the file if it doesn't exist
         fs.writeFileSync(this.segmentListFile, '', 'utf8');
         logger.info(`Created missing segment list file: ${this.segmentListFile}`);
       }
@@ -47,78 +49,109 @@ class RecorderService {
       return;
     }
 
-    try {
-      this.isRecording = true;
-      this._ensureSegmentListFileExists();
-      this._recordClip();
-      this._watchSegments();
-      logger.success('Recording started successfully');
-    } catch (error) {
-      this.isRecording = false;
-      this.stop();
-      logger.error(`Failed to start recording: ${error.message}`);
-      throw error
-    }
+    this.isStopping = false;
+    this.isRecording = true;
+
+    this._ensureSegmentListFileExists();
+    this._startFFmpeg();
+    this._watchSegments();
+
+    logger.success('Recording started');
   }
 
   /**
    * Record clip with synchronized segments
    */
-  _recordClip() {
-    const startTime = new Date();
-    
-    logger.info(`Starting recording at ${startTime.toUTCString()}`);
-
-    const segmentFormat = constants.recordingFormat || 'mkv'
-
-    let audioCodec = 'copy'
-    if(segmentFormat == 'mp4') {
-      audioCodec = 'aac'
-    }
-    
-    const segmentPattern = path.join(this.basePath, `segment_%Y-%m-%d_%H-%M-%S.${segmentFormat}`);
+  _startFFmpeg() {
+    this.lastStartTime = Date.now();
+    const segmentFormat = constants.recordingFormat || 'mkv';
     const segmentDuration = constants.recordingSegmentDurationInSeconds;
 
+    let audioCodec = 'copy';
+    if (segmentFormat === 'mp4') audioCodec = 'aac';
+
+    const segmentPattern = path.join(
+      this.basePath,
+      `segment_%Y-%m-%d_%H-%M-%S.${segmentFormat}`
+    );
+
+
     const args = [
+      // Relaiability and reconnection - RTSP can close incase of network break, this help with maintaining continuity
       '-rtsp_transport', 'tcp',
+      '-timeout', '5000000', 
+      '-reorder_queue_size', '100',
+
+      // input
       '-i', this.rtspUrl,
+      // For clean timestamps
       '-use_wallclock_as_timestamps', '1',
-      '-c:v', 'copy', '-c:a', audioCodec,
+
+      // Codec
+      '-c:v', 'copy',
+      '-c:a', audioCodec,
+
+      // Segmentation
       '-f', 'segment',
       '-reset_timestamps', '1',
-      `-segment_time`, `${segmentDuration}`,
-      `-segment_format`, `${segmentFormat}`,
+      '-segment_time', `${segmentDuration}`,
+      '-segment_format', `${segmentFormat}`,
       '-segment_atclocktime', '1',
       '-strftime', '1',
-      `-segment_list`, this.segmentListFile, // If you need to track the segment list
+      '-segment_list', this.segmentListFile,
       '-segment_list_type', 'flat',
+
+      // Output
       segmentPattern
     ];
 
-    this.ffmpegProcess = spawn('ffmpeg', args);
+    logger.info('Starting FFmpeg...');
 
-    // Log the FFmpeg output
-    this.ffmpegProcess.stdout.on('data', (data) => {
-      logger.info(`FFmpeg stdout: ${data}`);
+    fs.writeFileSync(this.segmentListFile, '', 'utf8');
+
+    this.ffmpegProcess = spawn('ffmpeg', args, {
+      stdio: ['ignore', 'ignore', 'pipe']
     });
 
     this.ffmpegProcess.stderr.on('data', (data) => {
-      logger.debug(`FFmpeg stderr: ${data}`);
+      logger.debug(`FFmpeg: ${data.toString().trim()}`);
     });
 
-    this.ffmpegProcess.on('close', (code) => {
-      if (code === 0) {
-        logger.info('FFmpeg process finished successfully');
+    this.ffmpegProcess.on('close', (code, signal) => {
+      logger.warn(`FFmpeg exited code=${code}, signal=${signal}`);
+      this.ffmpegProcess = null;
+
+      const runtime = Date.now() - this.lastStartTime;
+
+      // Reset counter if FFmpeg survived > 30s
+      if (runtime > 30000) {
+        this.restartAttempts = 0;
       } else {
-        logger.error(`FFmpeg process exited with code ${code}`);
+        this.restartAttempts++;
       }
-      
-      this.isRecording = false;
+
+      if (this.restartAttempts > 5) {
+        logger.error('FFmpeg failed repeatedly. Restart aborted.');
+        process.exit(code)
+        return;
+      }
+
+      /**
+       * exit code 0 is NOT success for live RTSP
+       */
+      if (!this.isStopping) {
+        logger.info('Restarting FFmpeg in 3 seconds...');
+        setTimeout(() => this._startFFmpeg(), 3000);
+      }
     });
 
     this.ffmpegProcess.on('error', (err) => {
-      logger.error(`FFmpeg process failed to start: ${err.message}`);
-      this.isRecording = false;
+      logger.error(`FFmpeg spawn error: ${err.message}`);
+      this.ffmpegProcess = null;
+
+      if (!this.isStopping) {
+        setTimeout(() => this._startFFmpeg(), 5000);
+      }
     });
   }
 
@@ -155,7 +188,7 @@ class RecorderService {
         filepath: recordingData.filepath,
         filesize: recordingData.filesize
       })
-      logger.info(`Recording data saved to database with ID: ${newRecordingId}`);
+      logger.info(`Recording saved (ID=${newRecordingId})`);
     } catch (error) {
       logger.error(`Error processing new segment: ${error.message}`);
     }
@@ -187,19 +220,22 @@ _watchSegments() {
    * Stop the recording process
    */
   stop() {
-    if (this.ffmpegCommand) {
-      logger.info("stopping ffmpeg")
-      this.ffmpegProcess.kill('SIGINT');
-      this.ffmpegCommand = null;
-    }
-    
-    if (this.unwatchSegments) {
-      logger.info("unwatching new segments")
-      this.unwatchSegments()
-    }
-    
+    logger.info('Stopping recorder gracefully...');
+    this.isStopping = true;
     this.isRecording = false;
-    logger.info('Recorder service stopped');
+
+    if (this.unwatchSegments) {
+      this.unwatchSegments();
+      this.unwatchSegments = null;
+    }
+
+    if (this.ffmpegProcess) {
+      // SIGINT allows FFmpeg to close the current segment cleanly
+      this.ffmpegProcess.kill('SIGINT');
+      this.ffmpegProcess = null;
+    }
+
+    logger.info('Recorder stopped');
   }
 }
 

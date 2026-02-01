@@ -20,8 +20,6 @@ class CleanUpService {
 
     async initialize() {
         this.currentSizeBytes = await filesHelper.getFolderSize(constants.recordingsPath);
-        console.log("MAX: "+MAX_SIZE_BYTES)
-        console.log("maxRecordingsFolderSizeInGB: "+constants.maxRecordingsFolderSizeInGB);
         logger.info(`Initialized cleanup service. Current folder size: ${this.currentSizeBytes} bytes.Max allowed: ${MAX_SIZE_BYTES}`);
 
         this.unsubscribe = await mqttService.subscribe(

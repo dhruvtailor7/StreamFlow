@@ -1,0 +1,1 @@
+nohup node index.js recorder > logs/recorder.log 2>&1 & echo $! > recorder.pid
